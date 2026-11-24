@@ -26,13 +26,22 @@ public class ReviewService {
     private final ActiveUserProvider activeUsers;
 
     @Transactional
-    public void create(UUID authorId, ReviewWriteRequest request) {
+    public void create(UUID authorId, UUID requestId, ReviewWriteRequest request) {
         User author = activeUsers.requireActiveForUpdate(authorId);
+        String fingerprint = request.creationFingerprint();
+        var existing = reviewRepository.findByAuthor_IdAndRequestId(authorId, requestId);
+        if (existing.isPresent()) {
+            if (!fingerprint.equals(existing.get().getRequestHash())) {
+                throw new ApiException(ErrorCode.IDEMPOTENCY_CONFLICT);
+            }
+            return;
+        }
         Review review = new Review(
                 author,
                 request.title(),
                 request.content(),
                 request.workYear());
+        review.identifyCreationRequest(requestId, fingerprint);
         reviewRepository.save(review);
     }
 

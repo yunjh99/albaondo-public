@@ -16,6 +16,10 @@ import com.example.albaondo_public.user.repository.UserRepository;
 import com.example.albaondo_public.user.service.ActiveUserProvider;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -135,6 +139,64 @@ class ReviewApiTest {
         return users.save(BeanUtils.instantiateClass(User.class)).getId();
     }
 
+    @Test
+    void concurrentRetriesCreateOneReview() throws Exception {
+        UUID owner = newUser();
+        UUID key = UUID.randomUUID();
+        var ready = new CountDownLatch(2);
+        Callable<Void> submit = () -> {
+            authenticate(owner);
+            try {
+                ready.countDown();
+                assertTrue(ready.await(5, TimeUnit.SECONDS));
+                submitReview(key, "original").andExpect(status().isCreated()).andExpect(content().string(""));
+                return null;
+            } finally {
+                SecurityContextHolder.clearContext();
+            }
+        };
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(submit);
+            var second = executor.submit(submit);
+            first.get(15, TimeUnit.SECONDS);
+            second.get(15, TimeUnit.SECONDS);
+        }
+        assertEquals(1, reviews.count());
+    }
+
+    @Test
+    void comparesTheOriginalSubmissionEvenAfterEditAndDeletion() throws Exception {
+        UUID owner = newUser();
+        UUID key = UUID.randomUUID();
+        authenticate(owner);
+        submitReview(key, "original").andExpect(status().isCreated());
+        long id = reviews.findByAuthor_IdAndRequestId(owner, key).orElseThrow().getReviewId();
+        mvc.perform(put("/api/reviews/{id}", id).contentType(MediaType.APPLICATION_JSON)
+            .content(body("edited"))).andExpect(status().isNoContent());
+        submitReview(key, "edited").andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("IDEMPOTENCY_CONFLICT"));
+        mvc.perform(delete("/api/reviews/{id}", id)).andExpect(status().isNoContent());
+        submitReview(key, "original").andExpect(status().isCreated());
+        assertEquals(ReviewStatus.HIDDEN, reviews.findById(id).orElseThrow().getStatus());
+        assertEquals(1, reviews.count());
+
+        submitReview(UUID.randomUUID(), "original").andExpect(status().isCreated());
+        authenticate(newUser());
+        submitReview(key, "another author's review").andExpect(status().isCreated());
+        assertEquals(3, reviews.count());
+    }
+
+    @Test
+    void creationRequiresUuidHeader() throws Exception {
+        authenticate(newUser());
+        mvc.perform(post("/api/reviews").contentType(MediaType.APPLICATION_JSON).content(body("title")))
+            .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/reviews").header("Idempotency-Key", "invalid")
+            .contentType(MediaType.APPLICATION_JSON).content(body("title")))
+            .andExpect(status().isBadRequest());
+        assertEquals(0, reviews.count());
+    }
+
     private void authenticate(UUID id) {
         var principal = new AuthenticatedUser(id, id.toString(), UserRole.USER);
         SecurityContextHolder.getContext().setAuthentication(
@@ -144,11 +206,16 @@ class ReviewApiTest {
 
     private long create(UUID id, String title) throws Exception {
         authenticate(id);
-        mvc.perform(post("/api/reviews").contentType(MediaType.APPLICATION_JSON).content(body(title)))
+        submitReview(UUID.randomUUID(), title)
             .andExpect(status().isCreated())
             .andExpect(content().string(""));
         return reviews.findByAuthor_IdAndStatus(id, ReviewStatus.PUBLISHED,
             org.springframework.data.domain.Pageable.unpaged()).getContent().getFirst().getReviewId();
+    }
+
+    private org.springframework.test.web.servlet.ResultActions submitReview(UUID key, String title) throws Exception {
+        return mvc.perform(post("/api/reviews").header("Idempotency-Key", key.toString())
+            .contentType(MediaType.APPLICATION_JSON).content(body(title)));
     }
 
     private String body(String title) {

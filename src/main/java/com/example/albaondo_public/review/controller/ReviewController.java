@@ -5,6 +5,7 @@ import com.example.albaondo_public.review.dto.ReviewWriteRequest;
 import com.example.albaondo_public.review.dto.ReviewListResponse;
 import com.example.albaondo_public.review.service.ReviewService;
 import jakarta.validation.Valid;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -30,9 +32,10 @@ public class ReviewController {
     @ResponseStatus(HttpStatus.CREATED)
     public void create(
         @AuthenticationPrincipal AuthenticatedUser user,
+        @RequestHeader("Idempotency-Key") UUID requestId,
         @Valid @RequestBody ReviewWriteRequest request
     ) {
-        reviewService.create(user.userId(), request);
+        reviewService.create(user.userId(), requestId, request);
     }
 
     @GetMapping

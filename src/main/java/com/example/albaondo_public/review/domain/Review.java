@@ -14,16 +14,21 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.util.Objects;
 import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.DynamicUpdate;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @DynamicUpdate
-@Table(name = "reviews")
+@Table(name = "reviews", uniqueConstraints = @UniqueConstraint(
+    name = "uk_reviews_author_request", columnNames = {"author_user_id", "request_id"}
+))
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Review {
@@ -32,6 +37,14 @@ public class Review {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "review_id", nullable = false)
     private Long reviewId;
+
+    // 키 도입 전의 후기는 두 값이 모두 null일 수 있다.
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(name = "request_id", columnDefinition = "BINARY(16)", updatable = false)
+    private UUID requestId;
+
+    @Column(name = "request_hash", length = 64, updatable = false)
+    private String requestHash;
 
     @Column(name = "title", nullable = false, length = 100)
     private String title;
@@ -68,6 +81,15 @@ public class Review {
         this.title = title;
         this.content = content;
         this.workYear = workYear;
+    }
+
+    public void identifyCreationRequest(UUID key, String hash) {
+        if (requestId != null) {
+            throw new IllegalStateException("등록 요청 키는 변경할 수 없습니다.");
+        }
+        Objects.requireNonNull(hash);
+        this.requestId = Objects.requireNonNull(key);
+        this.requestHash = hash;
     }
 
     public void hide() {
