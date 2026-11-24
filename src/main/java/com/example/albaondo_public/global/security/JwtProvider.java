@@ -1,18 +1,20 @@
 package com.example.albaondo_public.global.security;
 
-import com.example.albaondo_public.global.filter.CustomUserDetails;
+import com.example.albaondo_public.user.domain.User;
+import com.example.albaondo_public.user.domain.UserRole;
+import com.example.albaondo_public.user.domain.UserStatus;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
-import jakarta.servlet.http.HttpServletRequest;
-import java.util.Optional;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Date;
+import java.util.UUID;
 import javax.crypto.SecretKey;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
+import org.springframework.security.authentication.BadCredentialsException;
 
-/** 접근 토큰을 읽는 부분만 발췌했다. 키와 헤더 설정은 외부에서 받는다. */
 @RequiredArgsConstructor
 public class JwtProvider {
 
@@ -20,37 +22,81 @@ public class JwtProvider {
     private final SecretKey secretKey;
     @Getter
     private final String accessHeader;
+    private final Duration accessExpiration;
+    private final Duration refreshExpiration;
 
-    public Optional<String> extractBearerToken(HttpServletRequest request) {
-        return Optional.ofNullable(request.getHeader(accessHeader))
-            .filter(token -> token.startsWith(BEARER))
-            .map(token -> token.substring(BEARER.length()))
-            .filter(token -> !token.isBlank());
-    }
+    public record TokenPair(String accessToken, String refreshToken) {}
 
-    public Authentication getAuthentication(String token) {
-        Claims claims = extractToken(token);
-        requireTokenKind(claims, "access");
-        CustomUserDetails userDetails = CustomUserDetails.of(claims);
-        return new UsernamePasswordAuthenticationToken(
-            userDetails,
-            null,
-            userDetails.getAuthorities()
-        );
-    }
-
-    public Claims extractToken(String token) {
-        return Jwts.parser().verifyWith(secretKey).build().parseSignedClaims(token).getPayload();
-    }
-
-    private void requireTokenKind(Claims claims, String kind) {
-        if (
-            !kind.equals(claims.get("token_kind", String.class)) ||
-            claims.getSubject() == null ||
-            claims.getSubject().isBlank() ||
-            claims.getExpiration() == null
-        ) {
-            throw new JwtException("Invalid token kind or required claims");
+    public record TokenClaims(UUID userId, UserRole role, long version) {
+        public void verifyAccount(User user) {
+            if (user.getStatus() != UserStatus.ACTIVE || user.getDeletedAt() != null
+                || role != user.getRole() || version != user.getTokenVersion()) {
+                throw new BadCredentialsException("Token no longer matches the account");
+            }
         }
+    }
+
+    /** Called by the login flow after authenticating the account. */
+    public TokenPair issueTokens(User user) {
+        var claims = new TokenClaims(user.getId(), user.getRole(), user.getTokenVersion());
+        claims.verifyAccount(user);
+        return new TokenPair(issue("access", claims, accessExpiration), issue("refresh", claims, refreshExpiration));
+    }
+
+    TokenClaims verifyRefreshToken(String header) {
+        return verifyToken(header, "refresh");
+    }
+
+    String issueAccessToken(TokenClaims claims) {
+        return issue("access", claims, accessExpiration);
+    }
+
+    private String issue(String kind, TokenClaims claims, Duration lifetime) {
+        Instant now = Instant.now();
+        return Jwts.builder().subject(claims.userId().toString())
+            .id(UUID.randomUUID().toString()).claim("token_kind", kind)
+            .claim("role", claims.role().name()).claim("version", claims.version())
+            .issuedAt(Date.from(now)).expiration(Date.from(now.plus(lifetime)))
+            .signWith(secretKey).compact();
+    }
+
+    public TokenClaims verifyAccessToken(String header) {
+        return verifyToken(header, "access");
+    }
+
+    private TokenClaims verifyToken(String header, String kind) {
+        String token = extractBearerToken(header);
+        try {
+            Claims claims = Jwts.parser()
+                .verifyWith(secretKey)
+                .require("token_kind", kind)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
+            return readClaims(claims);
+        } catch (JwtException | IllegalArgumentException e) {
+            throw new BadCredentialsException("Invalid " + kind + " token", e);
+        }
+    }
+
+    private String extractBearerToken(String header) {
+        if (header == null || !header.startsWith(BEARER)) {
+            throw new BadCredentialsException("Bearer token is required");
+        }
+        String token = header.substring(BEARER.length());
+        if (token.isBlank()) {
+            throw new BadCredentialsException("Bearer token is required");
+        }
+        return token;
+    }
+
+    private TokenClaims readClaims(Claims claims) {
+        String subject = claims.getSubject();
+        String role = claims.get("role", String.class);
+        Long version = claims.get("version", Long.class);
+        if (subject == null || role == null || version == null || claims.getExpiration() == null) {
+            throw new BadCredentialsException("Required token claim is missing");
+        }
+        return new TokenClaims(UUID.fromString(subject), UserRole.valueOf(role), version);
     }
 }

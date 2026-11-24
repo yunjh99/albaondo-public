@@ -11,6 +11,7 @@
 | GET | `/api/reviews/mine` | 로그인한 회원이 작성한 공개 후기 목록 조회 |
 | PUT | `/api/reviews/{reviewId}` | 작성자가 제목·본문·근무 연도를 수정 |
 | DELETE | `/api/reviews/{reviewId}` | 작성자가 후기를 숨김 처리 |
+| POST | `/api/auth/refresh` | 리프레시 토큰으로 액세스 토큰 재발급 |
 
 **등록 재시도.** 클라이언트는 새 후기 제출마다 UUID를 정해 `Idempotency-Key` 헤더에 넣습니다. 응답을 받지 못하면 처음 전송한 키와 본문으로 재시도합니다. 같은 회원의 같은 키·내용에는 첫 요청과 동일하게 빈 본문의 `201 Created`를 반환합니다. 같은 키로 제목·본문·근무 연도를 바꾸면 `409 IDEMPOTENCY_CONFLICT`, 헤더가 빠지거나 UUID로 변환할 수 없으면 `400`을 반환합니다.
 
@@ -44,7 +45,19 @@
 
 ## 기술 스택과 공개 범위
 
-Java 21, Spring Boot 4.1.2, Spring MVC, Spring Security, JJWT, Spring Data JPA, Hibernate를 사용합니다. 원본의 데이터베이스는 MySQL입니다. 공개본에는 운영 설정, 토큰 발급과 키 주입, 배포 파일, 사용자 데이터를 포함하지 않습니다.
+Java 21, Spring Boot 4.1.2, Spring MVC, Spring Security, JJWT, Spring Data JPA, Hibernate를 사용합니다. 원본의 데이터베이스는 MySQL입니다. 운영 설정값, 실제 서명 키, 배포 파일, 사용자 데이터는 공개 대상에서 제외합니다.
+
+Spring은 시작할 때 `jwt.secret-key` 값을 외부 설정에서 읽어 `JwtProvider`를 생성하고 인증 필터에 전달합니다. 필터가 읽을 헤더 이름은 `jwt.access-header`로 설정하며 기본값은 `Authorization`입니다. [빈 생성과 필터 등록](src/main/java/com/example/albaondo_public/global/config/SecurityConfig.java)
+
+로그인 성공 후 서버가 호출하는 `JwtProvider.issueTokens(user)`는 인증된 회원의 ID, 역할, 토큰 버전을 담은 액세스·리프레시 토큰을 발급합니다. 공개본은 이 발급 메서드부터 시작하며, 로그인 화면과 자격 증명 검증은 원본 서비스에서 담당합니다.
+
+| 설정 | 공개본 기본값 | 용도 |
+| --- | --- | --- |
+| `jwt.access.expiration` | `PT15M` (15분) | 후기 API용 액세스 토큰 유효기간 |
+| `jwt.refresh.expiration` | `P14D` (14일) | 액세스 토큰 재발급 가능 기간 |
+| `jwt.refresh.header` | `X-Refresh-Token` | 재발급 요청에서 읽을 헤더 |
+
+액세스 토큰이 만료되면 `POST /api/auth/refresh`에 `X-Refresh-Token: Bearer <refreshToken>` 헤더만 보냅니다. 서버는 서명·용도·만료 시각과 현재 회원 상태·역할·토큰 버전을 확인하고 `{"accessToken":"..."}`을 반환합니다. 기존 리프레시 토큰은 최초 만료 시각까지 재사용하며, 회원의 토큰 버전이 바뀌면 즉시 거절합니다. 리프레시 토큰까지 만료되면 다시 로그인해야 합니다.
 
 ## 로컬에서 확인하기
 
