@@ -4,15 +4,22 @@
 
 출시 앱에서는 브랜드·지역 등 근무 정보를 담아 후기를 작성하고, 키워드와 업종으로 다른 사람의 후기를 찾을 수 있습니다. 이 저장소는 운영 백엔드에서 후기와 인증 흐름을 추려낸 Java 포트폴리오입니다. 제목·본문·근무 연도만으로 후기 등록 재시도, 작성자 권한 검사, 토큰 재발급을 테스트할 수 있습니다.
 
+---
+
 ## 기술 스택
 
-| 구분 | 운영 프로젝트 | 이 저장소에서 확인할 수 있는 구현 |
-| --- | --- | --- |
-| 백엔드 | Java 21, Spring Boot 4.1.2, Spring MVC, Spring Data JPA | 후기 API, 입력 검증, 트랜잭션 |
-| 인증 | Spring Security, JWT (JJWT) | 요청 필터, 계정 상태 확인, 액세스 토큰 재발급 |
-| 데이터 | MySQL, Hibernate | JPA 엔티티·저장소, H2 기반 통합 테스트 |
-| 클라이언트 | React Native · Expo 앱, React · TypeScript 웹 | 앱과 웹은 운영 프로젝트에서 관리 |
-| 빌드·테스트 | Gradle | JUnit, MockMvc, Spring Boot Test |
+| 구분 | 기술 |
+| --- | --- |
+| Backend | ![Java](https://img.shields.io/badge/Java-21-ED8B00?style=flat-square) ![Spring Boot](https://img.shields.io/badge/Spring_Boot-4.1.2-6DB33F?style=flat-square) ![Spring MVC](https://img.shields.io/badge/Spring_MVC-6DB33F?style=flat-square) ![Spring Data JPA](https://img.shields.io/badge/Spring_Data_JPA-6DB33F?style=flat-square) ![Hibernate](https://img.shields.io/badge/Hibernate-59666C?style=flat-square) ![Gradle](https://img.shields.io/badge/Gradle-02303A?style=flat-square) |
+| Security | ![Spring Security](https://img.shields.io/badge/Spring_Security-6DB33F?style=flat-square) ![JJWT](https://img.shields.io/badge/JJWT-0.13.0-000000?style=flat-square) |
+| Database | ![MySQL](https://img.shields.io/badge/MySQL-4479A1?style=flat-square) |
+| Mobile | ![React Native](https://img.shields.io/badge/React_Native-61DAFB?style=flat-square) ![Expo](https://img.shields.io/badge/Expo-000020?style=flat-square) |
+| Web | ![React](https://img.shields.io/badge/React-61DAFB?style=flat-square) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square) |
+| Test | ![JUnit](https://img.shields.io/badge/JUnit-25A162?style=flat-square) ![MockMvc](https://img.shields.io/badge/MockMvc-6DB33F?style=flat-square) ![Spring Boot Test](https://img.shields.io/badge/Spring_Boot_Test-6DB33F?style=flat-square) ![H2](https://img.shields.io/badge/H2-09476B?style=flat-square) |
+
+운영 앱과 웹은 Spring 백엔드와 MySQL을 사용합니다. 공개 저장소에서는 H2로 후기 API를 테스트합니다.
+
+---
 
 ## 출시 앱의 대표 화면과 이용 흐름
 
