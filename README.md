@@ -1,12 +1,13 @@
 # 알바온도
 
-**알바온도는 아르바이트 근로자를 위한 애플리케이션입니다.** 근무 일정과 급여를 관리하고, 근무 후기로 일터를 비교하고, 커뮤니티에서 다른 근로자와 경험을 나눌 수 있습니다.
 
 [구글 플레이 바로가기](https://play.google.com/store/apps/details?id=com.albaondo.app)
 
 | 시작 화면 | 알바 후기 | 월 예상 급여 | 근무 캘린더 |
 | :---: | :---: | :---: | :---: |
 | [![회원가입과 로그인](docs/images/welcome.png)](docs/images/welcome.png) | [![업직종별 알바 후기 목록](docs/images/reviews.png)](docs/images/reviews.png) | [![월 예상 급여와 근무지별 금액](docs/images/pay-summary.png)](docs/images/pay-summary.png) | [![날짜별 근무 시간과 예상 급여](docs/images/work-calendar.png)](docs/images/work-calendar.png) |
+
+**알바온도는 아르바이트 근로자를 위한 애플리케이션입니다.** 근무 일정과 급여를 관리하고, 근무 후기로 일터를 비교하고, 커뮤니티에서 다른 근로자와 경험을 나눌 수 있습니다.
 
 이 저장소는 운영 백엔드에서 후기와 인증 흐름을 추려낸 Java 포트폴리오입니다. 
 
