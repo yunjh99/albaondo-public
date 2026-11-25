@@ -1,8 +1,67 @@
-# 알바온도 | 후기 API
+# 알바온도
 
-알바온도는 아르바이트 근무 경험을 후기로 남기고 다른 사람의 후기를 살펴보는 서비스입니다. 원본은 모바일 앱과 웹 클라이언트, Spring 백엔드로 구성됩니다. 이 공개본에는 제목·본문·근무 연도로 구성한 후기의 작성, 수정, 삭제, 목록 조회와 두 종류의 후기 반응에 사용되는 엔티티를 담았습니다.
+**아르바이트를 구하는 사람이 근무지 후기를 찾아보고, 직접 일한 사람이 근무 경험과 평가를 남기는 서비스입니다.** [Google Play에서 알바온도 보기](https://play.google.com/store/apps/details?id=com.albaondo.app)
 
-## API
+출시 앱에서는 브랜드·지역 등 근무 정보를 담아 후기를 작성하고, 키워드와 업종으로 다른 사람의 후기를 찾을 수 있습니다. 이 저장소는 운영 백엔드에서 후기와 인증 흐름을 추려낸 Java 포트폴리오입니다. 제목·본문·근무 연도만으로 후기 등록 재시도, 작성자 권한 검사, 토큰 재발급을 테스트할 수 있습니다.
+
+## 기술 스택
+
+| 구분 | 운영 프로젝트 | 이 저장소에서 확인할 수 있는 구현 |
+| --- | --- | --- |
+| 백엔드 | Java 21, Spring Boot 4.1.2, Spring MVC, Spring Data JPA | 후기 API, 입력 검증, 트랜잭션 |
+| 인증 | Spring Security, JWT (JJWT) | 요청 필터, 계정 상태 확인, 액세스 토큰 재발급 |
+| 데이터 | MySQL, Hibernate | JPA 엔티티·저장소, H2 기반 통합 테스트 |
+| 클라이언트 | React Native · Expo 앱, React · TypeScript 웹 | 앱과 웹은 운영 프로젝트에서 관리 |
+| 빌드·테스트 | Gradle | JUnit, MockMvc, Spring Boot Test |
+
+## 출시 앱의 대표 화면과 이용 흐름
+
+| 화면 | 이용자가 하는 일 |
+| --- | --- |
+| 후기 탐색 | 키워드와 업종을 선택해 후기를 좁히고 최신순·인기순으로 살펴봅니다. 인기순은 좋아요 수가 같은 경우 작성 시각, 후기 ID 순으로 정렬합니다. |
+| 후기 작성 | 브랜드와 지역 등 근무 정보를 입력하고 경험을 기록합니다. 작성자는 등록한 후기를 수정하거나 숨길 수 있습니다. |
+| 후기 상세 | 근무 경험과 평가를 읽고 좋아요를 누르거나 나중에 다시 볼 후기를 북마크합니다. |
+
+## 후기 도메인 ERD
+
+공개 코드의 네 엔티티를 기준으로 표시했습니다. 좋아요와 꿀알바 투표는 각각 어느 회원이 어느 후기에 반응했는지 기록합니다.
+
+```mermaid
+erDiagram
+    USER ||--o{ REVIEW : writes
+    USER ||--o{ REVIEW_LIKE : likes
+    REVIEW ||--o{ REVIEW_LIKE : receives
+    USER ||--o{ REVIEW_HONEY_VOTE : votes
+    REVIEW ||--o{ REVIEW_HONEY_VOTE : receives
+```
+
+## 핵심 설계와 문제 해결
+
+### 1. 후기 등록 응답이 유실돼도 한 번만 저장
+
+저장은 끝났지만 모바일 앱이 응답을 받지 못하면 같은 후기를 다시 제출할 수 있습니다. 앱은 한 번의 제출에 UUID 하나를 부여하고, 재시도할 때 같은 `Idempotency-Key`를 보냅니다.
+
+서버는 트랜잭션 안에서 작성자 행을 먼저 잠근 뒤 해당 회원의 요청 키를 조회합니다. 같은 회원의 동시 등록은 이 행에서 대기합니다. 첫 요청이면 후기와 최초 입력의 해시를 함께 저장하고, DB에서도 작성자·요청 키 조합에 유일 제약을 둡니다.
+
+| 재요청 조건 | 공개 API의 결과 |
+| --- | --- |
+| 같은 회원·키·최초 입력 | 추가 저장 없이 최초와 같은 `201 Created` |
+| 같은 회원·키, 다른 입력 | `409 IDEMPOTENCY_CONFLICT` |
+| 키 누락 또는 UUID 형식 오류 | `400 Bad Request` |
+
+수정·삭제 후에도 최초 해시를 보존하므로 뒤늦은 재전송이 수정 내용을 덮어쓰거나 숨긴 후기를 복원하지 않습니다. [후기 서비스](src/main/java/com/example/albaondo_public/review/service/ReviewService.java) · [후기 엔티티](src/main/java/com/example/albaondo_public/review/domain/Review.java)
+
+### 2. 후기 수정·삭제에서 작성자와 상태 확인
+
+컨트롤러는 인증된 회원 ID를 서비스에 전달합니다. 서비스는 회원 → 후기 순서로 행을 잠그고 작성자 ID가 일치하는지 확인합니다. 삭제하면 후기는 `HIDDEN` 상태로 남습니다. 작성자가 삭제를 반복해도 성공하며 숨긴 후기를 수정하면 거절합니다. 전체 목록과 내 목록 모두 저장소 조회 단계에서 `PUBLISHED` 조건을 적용합니다. [후기 컨트롤러](src/main/java/com/example/albaondo_public/review/controller/ReviewController.java) · [후기 저장소](src/main/java/com/example/albaondo_public/review/repository/ReviewRepository.java)
+
+### 3. JWT 발급 이후 바뀐 계정 상태 반영
+
+토큰 유효기간 중에도 회원 상태나 역할이 바뀔 수 있습니다. 요청 필터는 액세스 토큰의 서명·용도·만료를 검사한 뒤 회원을 조회합니다. 회원 상태·역할·토큰 버전 검사를 통과하면 현재 DB 역할로 인증 정보를 구성합니다. 검증에 실패하면 인증 컨텍스트를 비우고 요청 처리를 종료합니다. [JwtAuthenticationFilter](src/main/java/com/example/albaondo_public/global/filter/JwtAuthenticationFilter.java) · [JwtProvider](src/main/java/com/example/albaondo_public/global/security/JwtProvider.java)
+
+## 공개 코드의 주요 API
+
+후기 API는 활성 회원의 액세스 토큰을 요구합니다. 여기서 ‘공개 후기’는 다른 로그인 회원도 읽을 수 있는 후기를 뜻합니다.
 
 | 메서드 | 경로 | 동작 |
 | --- | --- | --- |
@@ -12,10 +71,6 @@
 | PUT | `/api/reviews/{reviewId}` | 작성자가 제목·본문·근무 연도를 수정 |
 | DELETE | `/api/reviews/{reviewId}` | 작성자가 후기를 숨김 처리 |
 | POST | `/api/auth/refresh` | 리프레시 토큰으로 액세스 토큰 재발급 |
-
-**등록 재시도.** 클라이언트는 새 후기 제출마다 UUID를 정해 `Idempotency-Key` 헤더에 넣습니다. 응답을 받지 못하면 처음 전송한 키와 본문으로 재시도합니다. 같은 회원의 같은 키·내용에는 첫 요청과 동일하게 빈 본문의 `201 Created`를 반환합니다. 같은 키로 제목·본문·근무 연도를 바꾸면 `409 IDEMPOTENCY_CONFLICT`, 헤더가 빠지거나 UUID로 변환할 수 없으면 `400`을 반환합니다.
-
-서버는 회원 행을 잠근 후 요청 키를 조회하고, 최초 입력의 해시를 후기와 함께 한 트랜잭션에서 저장합니다. DB에는 작성자와 키의 조합에 유일 제약을 둡니다. 이후 후기를 수정하거나 숨겨도 최초 입력의 해시는 유지하므로 지연된 재시도가 내용을 되돌리거나 새 후기를 만들지 않습니다.
 
 두 목록은 모두 후기 ID 내림차순으로 정렬합니다. `page`는 0부터 시작하고 `size`는 기본 20, 최대 50입니다. 클라이언트는 각 항목의 제목·본문·근무 연도 전체를 펼쳐 볼 수 있습니다. `mine`은 로그인한 회원의 후기인지 표시하고, `hasNext`는 다음 페이지가 있는지 알려줍니다.
 
@@ -37,15 +92,7 @@
 }
 ```
 
-## 코드에서 볼 설계 결정
-
-- **작성자 ID는 인증 정보에서 얻습니다.** 컨트롤러는 JWT 인증으로 확인된 회원 ID를 서비스에 전달합니다. 작성과 수정의 입력에는 제목·본문·근무 연도만 받습니다. 목록은 작성자 정보 대신 `mine`을 반환합니다. [인증 필터](src/main/java/com/example/albaondo_public/global/filter/JwtAuthenticationFilter.java) · [후기 컨트롤러](src/main/java/com/example/albaondo_public/review/controller/ReviewController.java)
-- **수정과 삭제는 작성자 권한과 후기 상태를 확인한 뒤 반영합니다.** 두 요청 모두 회원 행을 먼저 잠근 뒤 후기 행을 잠가 상태 변경을 순서대로 처리합니다. 삭제한 후기는 `HIDDEN` 상태로 남기고 두 목록에서 제외합니다. 같은 삭제 요청을 반복해도 성공하며, 숨겨진 후기는 수정으로 다시 공개할 수 없습니다. [후기 서비스](src/main/java/com/example/albaondo_public/review/service/ReviewService.java) · [후기 엔티티](src/main/java/com/example/albaondo_public/review/domain/Review.java)
-- **목록은 필요한 페이지 분량만 조회합니다.** 저장소가 전체 목록에는 공개 상태 조건을, 내 목록에는 공개 상태와 작성자 조건을 함께 적용합니다. `Slice`로 다음 페이지 유무를 확인하고 응답 DTO로 필요한 데이터만 전달합니다. [후기 저장소](src/main/java/com/example/albaondo_public/review/repository/ReviewRepository.java) · [목록 응답 DTO](src/main/java/com/example/albaondo_public/review/dto/ReviewListResponse.java)
-
-## 기술 스택과 공개 범위
-
-Java 21, Spring Boot 4.1.2, Spring MVC, Spring Security, JJWT, Spring Data JPA, Hibernate를 사용합니다. 원본의 데이터베이스는 MySQL입니다. 운영 설정값, 실제 서명 키, 배포 파일, 사용자 데이터는 공개 대상에서 제외합니다.
+## 인증 설정과 재발급
 
 Spring은 시작할 때 `jwt.secret-key` 값을 외부 설정에서 읽어 `JwtProvider`를 생성하고 인증 필터에 전달합니다. 필터가 읽을 헤더 이름은 `jwt.access-header`로 설정하며 기본값은 `Authorization`입니다. [빈 생성과 필터 등록](src/main/java/com/example/albaondo_public/global/config/SecurityConfig.java)
 
